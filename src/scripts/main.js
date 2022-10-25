@@ -14,11 +14,9 @@ const isBrowser = typeof window !== 'undefined'
 	let timeout = null
 
 	return (...args) => {
-
 		clearTimeout(timeout)
 
 		timeout = setTimeout(() => fn(...args), duration)
-
 	}
 
 }
@@ -103,14 +101,14 @@ const relativeToAbsoluteValue = function(value, elem, scrollTop, viewportHeight)
 	if (elemAnchor === 'bottom') y += (elemSize.top + scrollTop) + elemSize.height
 
 	return `${ y }px`
-
 }
 
 
 class BasicScrollInstance {
-    #scrollContainer
-    #data
-    #active
+    #scrollContainer    // Parent scrolling container (class BasicScroll)
+    #config             // Raw config options
+    #data               // The calculated data
+    #active             // Whether this instance is active
 
     get isActive () {
         return !!this.#active
@@ -205,10 +203,10 @@ class BasicScrollInstance {
 
     /**
      * Validates data and sets defaults for undefined properties.
-     * @param {?Object} data
+     * @param {?Object} data - Config options
      * @returns {Object} data - Validated data.
      */
-    validate (data, scrollTop) {
+    validate (data, scrollTop, viewportHeight) {
         // Copy root object to avoid changes by reference
         data = Object.assign({}, data)
 
@@ -231,8 +229,8 @@ class BasicScrollInstance {
             if (isAbsoluteValue(data.from) === false) throw new Error('Property `from` must be a absolute value when no `elem` has been provided')
             if (isAbsoluteValue(data.to) === false) throw new Error('Property `to` must be a absolute value when no `elem` has been provided')
         } else {
-            if (isRelativeValue(data.from) === true) data.from = relativeToAbsoluteValue(data.from, data.elem, scrollTop, this.#scrollContainer.viewportHeight)
-            if (isRelativeValue(data.to) === true) data.to = relativeToAbsoluteValue(data.to, data.elem, scrollTop, this.#scrollContainer.viewportHeight)
+            if (isRelativeValue(data.from) === true) data.from = relativeToAbsoluteValue(data.from, data.elem, scrollTop, viewportHeight)
+            if (isRelativeValue(data.to) === true) data.to = relativeToAbsoluteValue(data.to, data.elem, scrollTop, viewportHeight)
         }
 
         data.from = parseAbsoluteValue(data.from)
@@ -264,11 +262,20 @@ class BasicScrollInstance {
 
         return data
     }
-    constructor (data, scrollContainer) {
-        this.#active = false
-        this.#scrollContainer = scrollContainer
 
-        this.#data = this.validate(data, this.#scrollContainer.scrollTop)
+    /**
+     * Recalculates levels. Useful on resize.
+     * @returns {null} 
+     */
+    recalculate (scrollTop, viewportHeight) {
+        this.#data = this.validate(this.#config, scrollTop, viewportHeight)
+        this.update(scrollTop)
+    }
+    constructor (data, scrollTop, viewportHeight) {
+        this.#active = false
+        this.#config = data
+
+        this.#data = this.validate(this.#config, scrollTop, viewportHeight)
     }
     start () {
         this.#active = true
@@ -282,7 +289,7 @@ class BasicScrollInstance {
 export default class BasicScroll {
     #instances
 
-    #scrollContainer
+    #container
     #previousScrollTop
 
 
@@ -307,7 +314,7 @@ export default class BasicScroll {
      * @returns {Number} scrollTop
      */
     get scrollTop () {
-        return this.#scrollContainer.scrollTop
+        return this.#container.scrollTop
     }
 
     
@@ -317,7 +324,8 @@ export default class BasicScroll {
      */
     get viewportHeight () {
         // TODO: boundingrect height
-        return (window.innerHeight || window.outerHeight)
+        if (this.#container == window) return (window.innerHeight || window.outerHeight)
+        else return this.#container.getBoundingClientRect().height
     }
 
     /**
@@ -337,7 +345,6 @@ export default class BasicScroll {
                 this.#previousScrollTop = this.scrollTop
             }
             
-
             requestAnimationFrame(repeat)
         }
         requestAnimationFrame(repeat)
@@ -347,19 +354,16 @@ export default class BasicScroll {
         this.#instances = []
         // Only run basicScroll when executed in a browser environment
         if (isBrowser) {
-            if (!scrollContainer) this.#scrollContainer = (document.scrollingElement || document.documentElement)
-            else this.#scrollContainer = scrollContainer
+            if (!scrollContainer) this.#container = (document.scrollingElement || document.documentElement)
+            else this.#container = scrollContainer
 
             this.run()
 
             // Recalculate and update instances when the window size changes
             window.addEventListener('resize', debounce(() => {
-                // Get all tracked instances
-                this.trackedInstances.forEach((instance) => {
-                    instance.validate()
-                    instance.update(this.scrollTop)
-                })
-
+                // Get all tracked instances and recalculate them
+                
+                this.trackedInstances.forEach((instance) => instance.recalculate(this.#container.scrollTop, this.viewportHeight))
             }, 50))
         } else {
             console.warn('basicScroll is not executing because you are using it in an environment without a `window` object')
@@ -367,7 +371,7 @@ export default class BasicScroll {
     }
 
     create (data) {
-        const instance = new BasicScrollInstance(data, this)
+        const instance = new BasicScrollInstance(data, this.scrollTop, this.viewportHeight)
         this.#instances.push(instance)
 
         instance.update()
